@@ -19,7 +19,7 @@ public:
     ApplicationLoader(const RttrConfig&, Loader&, Log&, std::string playlistPath);
     ~ApplicationLoader();
 
-    bool load();
+    bool load(bool skip_gui = false);
     Playlist* getPlaylist() const { return playlist_.get(); }
 
 private:

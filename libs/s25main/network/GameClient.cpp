@@ -117,8 +117,14 @@ bool GameClient::Connect(const std::string& server, const std::string& password,
 bool GameClient::HostGame(const CreateServerInfo& csi, const boost::filesystem::path& map_path, MapType map_type)
 {
     std::string hostPw = createRandString(20);
-    return GAMESERVER.Start(csi, map_path, map_type, hostPw)
-           && Connect("localhost", hostPw, csi.type, csi.port, true, csi.ipv6);
+    //std::string hostPw = csi.password;
+    bool autoconnect = csi.autoconnect;
+    LOG.write("hostPw:%s\n") % hostPw;
+    if(!GAMESERVER.Start(csi, map_path, map_type, hostPw))
+        return false;
+    if(!autoconnect)
+        return true;
+    return Connect("localhost", hostPw, csi.type, csi.port, true, csi.ipv6);
 }
 
 /**
@@ -387,6 +393,8 @@ bool GameClient::OnGameMessage(const GameMessage_Player_Id& msg)
 
     mainPlayer.playerId = msg.player;
 
+    LOG.write("sending player name:%s\n") % SETTINGS.lobby.name;
+    mainPlayer.sendMsgAsync(new GameMessage_Player_Name(0xFF, SETTINGS.lobby.name));
     // Server-Typ senden
     mainPlayer.sendMsgAsync(new GameMessage_Server_Type(clientconfig.servertyp, RTTR_Version::GetRevision()));
     return true;
@@ -423,6 +431,15 @@ bool GameClient::OnGameMessage(const GameMessage_Player_Name& msg)
     if(msg.player >= gameLobby->getNumPlayers())
         return true;
     gameLobby->getPlayer(msg.player).name = msg.playername;
+
+    /*
+    if(msg.player == mainPlayer.playerId)
+    {
+        LOG.write("received player name '%s' update for playerid %d\n") % msg.playername % msg.player;
+        mainPlayer.sendMsgAsync(new GameMessage_Server_Type(clientconfig.servertyp, RTTR_Version::GetRevision()));
+    }
+    */
+
     if(ci)
         ci->CI_PlayerDataChanged(msg.player);
     return true;
@@ -669,6 +686,7 @@ bool GameClient::OnGameMessage(const GameMessage_Server_TypeOK& msg)
         break;
     }
 
+    //to do: ensure player name is sent before, in order to log in owner without password
     mainPlayer.sendMsgAsync(new GameMessage_Server_Password(clientconfig.password));
 
     if(ci)
@@ -690,7 +708,7 @@ bool GameClient::OnGameMessage(const GameMessage_Server_Password& msg)
         return true;
     }
 
-    mainPlayer.sendMsgAsync(new GameMessage_Player_Name(0xFF, SETTINGS.lobby.name));
+    //mainPlayer.sendMsgAsync(new GameMessage_Player_Name(0xFF, SETTINGS.lobby.name));
     mainPlayer.sendMsgAsync(new GameMessage_MapRequest(true));
 
     if(ci)
@@ -841,6 +859,22 @@ bool GameClient::OnGameMessage(const GameMessage_Countdown& msg)
         return true;
     if(ci)
         ci->CI_Countdown(msg.countdown);
+    return true;
+}
+
+bool GameClient::OnGameMessage(const GameMessage_UpdateIsHost& msg)
+{
+    LOG.writeToFile("<<< NMS_PLAYER_ISHOST(%u) isHost=%d\n") % unsigned(msg.player) % msg.isHost;
+    if(state != ClientState::Connect)
+        return true;
+
+    if(msg.player != mainPlayer.playerId)
+        return true;
+
+    clientconfig.isHost = msg.isHost;
+
+    //if(ci)
+    //    ci-> update somthing?
     return true;
 }
 

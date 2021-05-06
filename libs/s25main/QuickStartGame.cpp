@@ -32,34 +32,36 @@ public:
     }
 };
 
-bool QuickStartGame(const boost::filesystem::path& mapOrReplayPath, bool singlePlayer)
+bool QuickStartGame(const boost::filesystem::path& mapOrReplayPath, const std::string owner)
 {
     if(!exists(mapOrReplayPath))
     {
-        LOG.write(_("Given map or replay (%1%) does not exist!")) % mapOrReplayPath;
+        LOG.write(_("Given map or replay (%1%) does not exist!\n")) % mapOrReplayPath;
         return false;
     }
 
-    ApplicationLoader loader(RTTRCONFIG, LOADER, LOG, SETTINGS.sound.playlist);
-    if(!loader.load())
-        return false;
-    if(loader.getPlaylist())
-        MUSICPLAYER.SetPlaylist(std::move(*loader.getPlaylist()));
-    if(SETTINGS.sound.musicEnabled)
-        MUSICPLAYER.Play();
+    //ApplicationLoader loader(RTTRCONFIG, LOADER, LOG, SETTINGS.sound.playlist);
+    //if(!loader.load())
+    //    return false;
+    //if(loader.getPlaylist())
+    //    MUSICPLAYER.SetPlaylist(std::move(*loader.getPlaylist()));
+    //if(SETTINGS.sound.musicEnabled)
+    //    MUSICPLAYER.Play();
 
-    const CreateServerInfo csi(singlePlayer ? ServerType::Local : ServerType::Direct, SETTINGS.server.localPort,
-                               _("Unlimited Play"));
+    //std::string passwd = "test-adysnook";
+    std::string passwd = "";
+    const CreateServerInfo csi(ServerType::Lobby, SETTINGS.server.localPort, _("Unlimited Play"), passwd, false, false,
+                               owner, false);
 
     LOG.write(_("Loading game...\n"));
     const std::string extension = s25util::toLower(mapOrReplayPath.extension().string());
 
-    WINDOWMANAGER.Switch(std::make_unique<dskSelectMap>(csi));
+    //WINDOWMANAGER.Switch(std::make_unique<dskSelectMap>(csi));
 
     if((extension == ".sav" && GAMECLIENT.HostGame(csi, mapOrReplayPath, MapType::Savegame))
        || ((extension == ".swd" || extension == ".wld") && GAMECLIENT.HostGame(csi, mapOrReplayPath, MapType::OldMap)))
     {
-        WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwPleaseWait>());
+        //WINDOWMANAGER.ShowAfterSwitch(std::make_unique<iwPleaseWait>());
         return true;
     } else
     {

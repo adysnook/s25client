@@ -25,6 +25,8 @@
 #include "s25util/colors.h"
 #include <boost/lexical_cast.hpp>
 #include <set>
+#include "QuickStartGame.h"
+#include "network/GameServer.h"
 
 namespace {
 enum
@@ -292,6 +294,19 @@ void dskLobby::LC_Chat(const std::string& player, const std::string& text)
     }
 
     GetCtrl<ctrlChat>(ID_Chat)->AddMessage(time, player, playerColor, text, COLOR_YELLOW);
+
+    if (text.substr(0, 5) == "!host") {
+        std::string map_name = "RTTR\\MAPS\\NEW\\" + text.substr(6);
+        std::string response_msg;
+        if (QuickStartGame(map_name, player)) {
+            response_msg = "Game created with map " + map_name + ". hostPw:" + GAMESERVER.getHostPassword();
+        }
+        else
+        {
+            response_msg = "Error creating game with map " + map_name;
+        }
+        LOBBYCLIENT.SendChat(response_msg);
+    }
 }
 
 void dskLobby::LC_ServerList(const LobbyServerList& servers)

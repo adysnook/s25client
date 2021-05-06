@@ -15,11 +15,13 @@ struct CreateServerInfo
     const uint16_t port;
     const std::string gameName;
     const std::string password;
+    const std::string ownerName;
     const bool ipv6; // IPv6 or IPv4
     const bool use_upnp;
+    const bool autoconnect;
     CreateServerInfo(ServerType type, uint16_t port, std::string gameName, std::string password = "", bool ipv6 = false,
-                     bool useUpnp = false)
+                     bool useUpnp = false, std::string owner = "", bool autoconnect = true)
         : type(type), port(port), gameName(std::move(gameName)), password(std::move(password)), ipv6(ipv6),
-          use_upnp(useUpnp)
+          use_upnp(useUpnp), ownerName(owner), autoconnect(autoconnect)
     {}
 };

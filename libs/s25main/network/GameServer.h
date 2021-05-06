@@ -52,6 +52,9 @@ public:
     /// Assign players that do not have a fixed team, return true if any player was assigned.
     static bool assignPlayersOfRandomTeams(std::vector<JoinPlayerInfo>& playerInfos);
 
+    std::string getHostPassword();
+    std::string getPassword();
+
 private:
     bool StartGame();
 
@@ -102,6 +105,7 @@ private:
     bool OnGameMessage(const GameMessage_RemoveLua& msg) override;
     bool OnGameMessage(const GameMessage_Countdown& msg) override;
     bool OnGameMessage(const GameMessage_CancelCountdown& msg) override;
+    bool OnGameMessage(const GameMessage_UpdateIsHost& msg) override;
     bool OnGameMessage(const GameMessage_Pause& msg) override;
     bool OnGameMessage(const GameMessage_SkipToGF& msg) override;
     RTTR_POP_DIAGNOSTIC
@@ -152,7 +156,7 @@ private:
 
         ServerType servertype;
         std::string gamename;
-        std::string hostPassword, password;
+        std::string hostPassword, password, ownerName;
         unsigned short port;
         bool ipv6;
     } config;

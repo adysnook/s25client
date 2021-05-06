@@ -14,10 +14,10 @@ ApplicationLoader::ApplicationLoader(const RttrConfig& rttrConfig, Loader& loade
 
 ApplicationLoader::~ApplicationLoader() = default;
 
-bool ApplicationLoader::load()
+bool ApplicationLoader::load(bool skip_gui)
 {
     loader_.initResourceFolders();
-    if(!loader_.LoadFilesAtStart())
+    if(!loader_.LoadFilesAtStart(skip_gui))
         return false;
     if(!playlistPath_.empty())
     {

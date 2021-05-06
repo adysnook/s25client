@@ -124,6 +124,7 @@ bool GameServer::Start(const CreateServerInfo& csi, const boost::filesystem::pat
     config.servertype = csi.type;
     config.port = csi.port;
     config.ipv6 = csi.ipv6;
+    config.ownerName = csi.ownerName;
     mapinfo.type = map_type;
     mapinfo.filepath = map_path;
 
@@ -621,6 +622,7 @@ void GameServer::KickPlayer(uint8_t playerId, KickReason cause, uint32_t param)
     if(!playerInfo.isUsed())
         return;
     playerInfo.ps = PlayerState::Free;
+    playerInfo.isHost = false;
 
     SendToAll(GameMessage_Player_Kicked(playerId, cause, param));
 
@@ -935,23 +937,33 @@ bool GameServer::OnGameMessage(const GameMessage_Server_Password& msg)
         KickPlayer(msg.senderPlayerID, KickReason::InvalidMsg, __LINE__);
         return true;
     }
-
+    
     GameServerPlayer* player = GetNetworkPlayer(msg.senderPlayerID);
     if(!player)
         return true;
 
     std::string passwordok = (config.password == msg.password ? "true" : "false");
-    if(msg.password == config.hostPassword)
+    if (playerInfos[msg.senderPlayerID].isHost) {
+        passwordok = "true";
+        LOG.write("Host already authenticated. Skipping hostPassword check\n");
+    }else if(msg.password == config.hostPassword)
     {
         passwordok = "true";
         playerInfos[msg.senderPlayerID].isHost = true;
+        LOG.write("Host authenticated with password:%s\n") % msg.password;
     } else
         playerInfos[msg.senderPlayerID].isHost = false;
 
+    if(playerInfos[msg.senderPlayerID].isHost)
+    {
+        player->sendMsgAsync(new GameMessage_UpdateIsHost(msg.senderPlayerID, true));
+        LOG.writeToFile("SERVER >>> CLIENT%d: NMS_PLAYER_ISHOST(%d)\n") % unsigned(msg.senderPlayerID) % true;
+    }
     player->sendMsgAsync(new GameMessage_Server_Password(passwordok));
 
     if(passwordok == "false")
         KickPlayer(msg.senderPlayerID, KickReason::WrongPassword, __LINE__);
+
     return true;
 }
 
@@ -1042,9 +1054,14 @@ bool GameServer::OnGameMessage(const GameMessage_Player_Name& msg)
     if(playerID < 0)
         return true;
 
+    LOG.write("CLIENT%d >>> SERVER: NMS_PLAYER_NAME(%s)\n") % playerID % msg.playername;
     LOG.writeToFile("CLIENT%d >>> SERVER: NMS_PLAYER_NAME(%s)\n") % playerID % msg.playername;
 
     playerInfos[playerID].name = msg.playername;
+    if (msg.playername == config.ownerName) {
+        playerInfos[playerID].isHost = true;
+        LOG.write("Host authenticated by name: %s\n") % msg.playername;
+    }
     SendToAll(GameMessage_Player_Name(playerID, msg.playername));
     PlayerDataChanged(playerID);
 
@@ -1398,6 +1415,30 @@ bool GameServer::OnGameMessage(const GameMessage_CancelCountdown& msg)
     }
 
     CancelCountdown();
+    return true;
+}
+
+bool GameServer::OnGameMessage(const GameMessage_UpdateIsHost& msg)
+{
+    LOG.writeToFile("CLIENT%d >>> SERVER: NMS_PLAYER_ISHOST(%d)\n") % msg.player % msg.isHost;
+    if(state != ServerState::Config || !IsHost(msg.senderPlayerID))
+    {
+        KickPlayer(msg.senderPlayerID, KickReason::InvalidMsg, __LINE__);
+        return true;
+    }
+
+    int playerID = GetTargetPlayer(msg);
+    if(playerID < 0)
+        return true;
+
+    GameServerPlayer* nw_player = GetNetworkPlayer(msg.senderPlayerID);
+    if(!nw_player)
+        return true;
+
+    JoinPlayerInfo& player = playerInfos[playerID];
+    player.isHost = msg.isHost;
+    
+    nw_player->sendMsgAsync(msg.clone());
     return true;
 }
 
@@ -1761,4 +1802,13 @@ int GameServer::GetTargetPlayer(const GameMessageWithPlayer& msg)
     } else if(msg.senderPlayerID < playerInfos.size())
         return msg.senderPlayerID;
     return -1;
+}
+
+std::string GameServer::getHostPassword() {
+    return config.hostPassword;
+}
+
+std::string GameServer::getPassword()
+{
+    return config.password;
 }

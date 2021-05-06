@@ -44,6 +44,7 @@ GENERATE_GAME_MESSAGE_INTERFACE(GameMessage_Ping, GameMessage_Pong,
                                 GameMessage_Server_Type, GameMessage_Server_TypeOK, GameMessage_Server_Password,
                                 GameMessage_Server_Name, GameMessage_Server_Start, GameMessage_Chat,
                                 GameMessage_Server_Async, GameMessage_Countdown, GameMessage_CancelCountdown,
+                                GameMessage_UpdateIsHost,
 
                                 GameMessage_Player_Id, GameMessage_Player_Name, GameMessage_Player_List,
                                 GameMessage_Player_State, GameMessage_Player_Nation, GameMessage_Player_Team,

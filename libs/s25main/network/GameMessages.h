@@ -240,6 +240,37 @@ public:
 };
 
 /// Cancel countdown
+class GameMessage_UpdateIsHost : public GameMessageWithPlayer
+{
+public:
+    bool isHost;
+    GameMessage_UpdateIsHost() : GameMessageWithPlayer(NMS_PLAYER_ISHOST) {}
+    GameMessage_UpdateIsHost(uint8_t player, const bool is_host = false)
+        : GameMessageWithPlayer(NMS_PLAYER_ISHOST, player), isHost(is_host)
+    {
+        LOG.writeToFile(">>> NMS_PLAYER_ISHOST(%d):%d\n") % unsigned(player) % is_host;
+    }
+
+    void Serialize(Serializer& ser) const override
+    {
+        GameMessageWithPlayer::Serialize(ser);
+        ser.PushBool(isHost);
+    }
+
+    void Deserialize(Serializer& ser) override
+    {
+        GameMessageWithPlayer::Deserialize(ser);
+        isHost = ser.PopBool();
+    }
+
+    bool Run(GameMessageInterface* callback) const override
+    {
+        LOG.writeToFile("<<< NMS_PLAYER_ISHOST(%d, %d)\n") % unsigned(player) % isHost;
+        return callback->OnGameMessage(*this);
+    }
+};
+
+/// Cancel countdown
 class GameMessage_CancelCountdown : public GameMessage
 {
 public:

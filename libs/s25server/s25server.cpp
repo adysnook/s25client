@@ -3,12 +3,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "Debug.h"
-#include "GameManager.h"
+#include "GameManagerServer.h"
 #include "QuickStartGame.h"
 #include "RTTR_AssertError.h"
 #include "RTTR_Version.h"
 #include "RttrConfig.h"
-#include "Settings.h"
+#include "SettingsServer.h"
 #include "SignalHandler.h"
 #include "WindowManager.h"
 #include "commands.h"
@@ -24,6 +24,14 @@
 #include "s25util/StringConversion.h"
 #include "s25util/System.h"
 #include "s25util/error.h"
+#include "liblobby/LobbyClient.h"
+#include "liblobby/LobbyInterface.h"
+#include "Loader.h"
+#include "gameData/ApplicationLoader.h"
+#include "s25util/MyTime.h"
+#include "s25util/colors.h"
+#include "controls/ctrlChat.h"
+#include "network/GameServer.h"
 #include <boost/filesystem.hpp>
 #include <boost/nowide/args.hpp>
 #include <boost/nowide/iostream.hpp>
@@ -138,7 +146,7 @@ bool askForDebugData()
 }
 bool shouldSendDebugData()
 {
-    return (SETTINGS.global.submit_debug_data == 1) || askForDebugData();
+    return (SETTINGS_SERVER.global.submit_debug_data == 1) || askForDebugData();
 }
 
 void showCrashMessage()
@@ -412,7 +420,7 @@ bool InitDirectories()
     return true;
 }
 
-bool InitGame(GameManager& gameManager)
+bool InitGame(GameManagerServer& gameManagerServer)
 {
     libsiedler2::setAllocator(new GlAllocator());
 
@@ -425,7 +433,7 @@ bool InitGame(GameManager& gameManager)
     }
 
     // Spiel starten
-    if(!gameManager.Start())
+    if(!gameManagerServer.Start())
     {
         s25util::error("Failed to start the game");
         return false;
@@ -451,6 +459,7 @@ int RunProgram(po::variables_map& options)
     // (spielentscheidende) wird unser Generator verwendet)
     srand(static_cast<unsigned>(std::time(nullptr)));
 
+    /*
     if(options.count("convert-sounds"))
     {
         try
@@ -463,20 +472,71 @@ int RunProgram(po::variables_map& options)
             return 1;
         }
     }
+    */
 
-    SetGlobalInstanceWrapper<GameManager> gameManager(setGlobalGameManager, LOG, SETTINGS, VIDEODRIVER, AUDIODRIVER,
-                                                      WINDOWMANAGER);
+    //SetGlobalInstanceWrapper<GameManager> gameManager(setGlobalGameManager, LOG, SETTINGS, VIDEODRIVER, AUDIODRIVER,
+    //                                                  WINDOWMANAGER);
+
+    SetGlobalInstanceWrapper<GameManagerServer> gameManagerServer(setGlobalGameManagerServer, LOG, SETTINGS_SERVER);
+
+
     try
     {
-        if(!InitGame(gameManager))
+        if(!InitGame(gameManagerServer))
             return 2;
 
         //if(options.count("map") && !QuickStartGame(options["map"].as<std::string>()))
         //    return 1;
 
         // Hauptschleife
+        ApplicationLoader loader(RTTRCONFIG, LOADER, LOG, "");
+        if(!loader.load(true))
+            return 4;
+        LOBBYCLIENT.SetProgramVersion(RTTR_Version::GetReadableVersion());
+        if(!LOBBYCLIENT.Login(LOADER.GetTextN("client", 0),
+                              s25util::fromStringClassic<unsigned>(LOADER.GetTextN("client", 1)), "adysnookhostbot", "adysnooktest",
+                              SETTINGS_SERVER.server.ipv6))
+        {
+            return 3;
+        }
+        class : public LobbyInterface
+        {
+        public:
+            void LC_Chat(const std::string& player, const std::string& text)
+            {
+                unsigned player_color = ctrlChat::CalcUniqueColor(player);
 
-        while(gameManager.Run())
+                std::string time_string = s25util::Time::FormatTime("(%H:%i:%s)");
+                auto msg_color = COLOR_YELLOW;
+
+                //GetCtrl<ctrlChat>(ID_Chat)->AddMessage(time, player, playerColor, text, COLOR_YELLOW);
+                // Loggen
+                LOG.write("%s <") % time_string;
+                LOG.writeColored("%1%", player_color) % player;
+                LOG.write(">: ");
+                LOG.writeColored("%1%", msg_color) % text;
+                LOG.write("\n");
+
+                if(text.substr(0, 6) == ".host ")
+                {
+                    std::string map_name = "RTTR\\MAPS\\NEW\\" + text.substr(7);
+                    std::string response_msg;
+                    if(QuickStartGame(map_name, player))
+                    {
+                        response_msg = "Game created for owner " + player + " with map " + map_name
+                                       + ". Password:" + GAMESERVER.getPassword();
+                    } else
+                    {
+                        response_msg = "Error creating game with map " + map_name;
+                    }
+                    LOBBYCLIENT.SendChat(response_msg);
+                }
+            };
+        } callback_obj;
+        LOBBYCLIENT.AddListener(&callback_obj);
+        
+
+        while(gameManagerServer.Run())
         {
 #ifndef _WIN32
             killme = false;
@@ -484,7 +544,7 @@ int RunProgram(po::variables_map& options)
         }
 
         // Spiel beenden
-        gameManager.Stop();
+        gameManagerServer.Stop();
         libsiedler2::setAllocator(nullptr);
     } catch(RTTR_AssertError& error)
     {

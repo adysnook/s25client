@@ -8,4 +8,4 @@
 #include <string>
 
 /// Tries to start a game (map, savegame or replay) and returns whether this was successfull
-bool QuickStartGame(const boost::filesystem::path& mapOrReplayPath, bool singlePlayer = false);
+bool QuickStartGame(const boost::filesystem::path& mapOrReplayPath, const std::string owner);

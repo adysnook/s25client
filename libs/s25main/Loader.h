@@ -74,7 +74,7 @@ public:
     void initResourceFolders(const std::vector<Nation>& usedNations, const std::vector<AddonId>& enabledAddons);
 
     /// Load general files required also outside of games
-    bool LoadFilesAtStart();
+    bool LoadFilesAtStart(bool skip_gui = false);
     bool LoadFonts();
     /// Load files required during a game
     bool LoadFilesAtGame(const std::string& mapGfxPath, bool isWinterGFX, const std::vector<Nation>& nations,

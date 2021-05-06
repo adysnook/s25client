@@ -183,39 +183,44 @@ glArchivItem_Bitmap_Player* Loader::GetMapPlayerImage(unsigned nr)
  *
  *  @return @p true on success, @p false on error.
  */
-bool Loader::LoadFilesAtStart()
+bool Loader::LoadFilesAtStart(bool skip_gui)
 {
-    namespace res = s25::resources;
-    // Palettes
-    if(!LoadFiles({res::pal5, res::pal6, res::pal7, res::paletti0, res::paletti1, res::paletti8})
-       || !Load(ResourceId("colors")))
-        return false;
-
-    if(!LoadFonts())
-        return false;
-
-    std::vector<std::string> files = {res::resource,
-                                      res::io,                       // Menu graphics
-                                      res::setup013, res::setup015}; // Backgrounds for options and free play
-
-    const std::array<bfs::path, 2> loadScreenFolders{config_.ExpandPath(s25::folders::loadScreens),
-                                                     config_.ExpandPath(s25::folders::loadScreensMissions)};
-    for(const std::string& loadScreenId : LOAD_SCREENS)
+    if(!skip_gui)
     {
-        const std::string filename = s25util::toUpper(loadScreenId) + ".LBM";
-        if(exists(loadScreenFolders[0] / filename))
-            files.push_back((loadScreenFolders[0] / filename).string());
-        else
-            files.push_back((loadScreenFolders[1] / filename).string());
+        namespace res = s25::resources;
+        // Palettes
+        if(!LoadFiles({res::pal5, res::pal6, res::pal7, res::paletti0, res::paletti1, res::paletti8})
+           || !Load(ResourceId("colors")))
+            return false;
+
+        if(!LoadFonts())
+            return false;
+
+        std::vector<std::string> files = {res::resource,
+                                          res::io,                       // Menu graphics
+                                          res::setup013, res::setup015}; // Backgrounds for options and free play
+
+        const std::array<bfs::path, 2> loadScreenFolders{config_.ExpandPath(s25::folders::loadScreens),
+                                                         config_.ExpandPath(s25::folders::loadScreensMissions)};
+        for(const std::string& loadScreenId : LOAD_SCREENS)
+        {
+            const std::string filename = s25util::toUpper(loadScreenId) + ".LBM";
+            if(exists(loadScreenFolders[0] / filename))
+                files.push_back((loadScreenFolders[0] / filename).string());
+            else
+                files.push_back((loadScreenFolders[1] / filename).string());
+        }
+
+        if(!LoadFiles(files))
+            return false;
+
+        if(!LoadSounds())
+            return false;
+        return LoadResources({"io_new", "client", "languages", "logo", "menu", "rttr"});
+    } else
+    {
+        return LoadResources({"client", "languages"});
     }
-
-    if(!LoadFiles(files))
-        return false;
-
-    if(!LoadSounds())
-        return false;
-
-    return LoadResources({"io_new", "client", "languages", "logo", "menu", "rttr"});
 }
 
 bool Loader::LoadSounds()

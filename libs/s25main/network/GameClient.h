@@ -205,6 +205,7 @@ private:
     bool OnGameMessage(const GameMessage_Server_Async& msg) override;
     bool OnGameMessage(const GameMessage_Countdown& msg) override;
     bool OnGameMessage(const GameMessage_CancelCountdown& msg) override;
+    bool OnGameMessage(const GameMessage_UpdateIsHost& msg) override;
 
     bool OnGameMessage(const GameMessage_Player_Id& msg) override;
     bool OnGameMessage(const GameMessage_Player_List& msg) override;
