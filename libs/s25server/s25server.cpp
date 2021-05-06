@@ -538,6 +538,7 @@ int RunProgram(po::variables_map& options)
 
         while(gameManagerServer.Run())
         {
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
 #ifndef _WIN32
             killme = false;
 #endif // !_WIN32
