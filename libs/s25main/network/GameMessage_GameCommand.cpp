@@ -5,6 +5,7 @@
 #include "GameMessage_GameCommand.h"
 #include "GameMessageInterface.h"
 #include "GameProtocol.h"
+#include <s25util/Log.h>
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -13,7 +14,9 @@ GameMessage_GameCommand::GameMessage_GameCommand() : GameMessageWithPlayer(NMS_G
 GameMessage_GameCommand::GameMessage_GameCommand(uint8_t player, const AsyncChecksum& checksum,
                                                  const std::vector<gc::GameCommandPtr>& gcs)
     : GameMessageWithPlayer(NMS_GAMECOMMANDS, player), cmds(checksum, gcs)
-{}
+{
+    //LOG.writeToFile(">>> NMS_GAMECOMMANDS(%d, %d, %d)\n") % unsigned(player) % checksum.getHash() % gcs.size();
+}
 
 void GameMessage_GameCommand::Serialize(Serializer& ser) const
 {
@@ -29,5 +32,6 @@ void GameMessage_GameCommand::Deserialize(Serializer& ser)
 
 bool GameMessage_GameCommand::Run(GameMessageInterface* callback) const
 {
+    //LOG.writeToFile("<<< NMS_GAMECOMMANDS(%d, %d, %d)\n") % unsigned(player) % cmds.checksum.getHash() % cmds.gcs.size();
     return callback->OnGameMessage(*this);
 }

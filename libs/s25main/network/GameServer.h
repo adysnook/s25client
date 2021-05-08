@@ -15,6 +15,8 @@
 #include "liblobby/LobbyInterface.h"
 #include "s25util/LANDiscoveryService.h"
 #include "s25util/Singleton.h"
+#include "ClientError.h"
+#include "ILocalGameState.h"
 #include <chrono>
 #include <vector>
 
@@ -23,12 +25,19 @@ class GameMessage;
 class GameMessageWithPlayer;
 class GameMessage_GameCommand;
 class GameServerPlayer;
+class GameLobby;
+class Game;
 struct AIServerPlayer;
+struct ReplayInfo;
+class SavedFile;
+class GamePlayer;
+class AIPlayer;
 
 class GameServer :
     public Singleton<GameServer, SingletonPolicies::WithLongevity>,
     public GameMessageInterface,
-    public LobbyInterface
+    public LobbyInterface,
+    public ILocalGameState
 {
 public:
     static constexpr unsigned Longevity = 6;
@@ -54,6 +63,20 @@ public:
 
     std::string getHostPassword();
     std::string getPassword();
+
+    unsigned GetGFNumber() const;
+    unsigned GetPlayerId() const override { 
+        return -1;
+        //return mainPlayer.playerId; 
+    }
+    bool IsHost() const override { 
+        return true;
+        //return clientconfig.isHost;
+    }
+    /// Wandelt eine GF-Angabe in eine Zeitangabe um (HH:MM:SS oder MM:SS wenn Stunden = 0)
+    std::string FormatGFTime(unsigned gf) const override;
+    void SystemChat(const std::string& text) override;
+    void SystemChat(const std::string& text, unsigned char fromPlayerIdx);
 
 private:
     bool StartGame();
@@ -146,7 +169,7 @@ private:
         Game
     } state;
 
-    FramesInfo framesinfo;
+    FramesInfoClient framesinfo;
     unsigned currentGF;
 
     struct ServerConfig
@@ -195,6 +218,20 @@ private:
 
     LANDiscoveryService lanAnnouncer;
     void RunStateLoading();
+
+    /// Game state itself (valid during LOADING and GAME state)
+    std::shared_ptr<Game> game;
+    void NextGF(bool wasNWF);
+    std::unique_ptr<ReplayInfo> replayinfo;
+    void StartReplayRecording(unsigned random_init);
+    void WritePlayerInfo(SavedFile& file);
+    unsigned GetNumPlayers() const;
+    GamePlayer& GetPlayer(unsigned id);
+    void SendNothingNC(uint8_t player = 0xFF);
+    std::unique_ptr<AIPlayer> CreateAIPlayer(unsigned playerId, const AI::Info& aiInfo);
+    void OnError(ClientError error);
+    void ExecuteNWFClient();
+    void ExecuteAllGCs(uint8_t playerId, const PlayerGameCommands& gcs);
 };
 
 ///////////////////////////////////////////////////////////////////////////////

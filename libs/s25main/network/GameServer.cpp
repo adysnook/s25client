@@ -32,6 +32,14 @@
 #include "s25util/SocketSet.h"
 #include "s25util/colors.h"
 #include "s25util/utf8.h"
+#include "ai/AIPlayer.h"
+#include "Game.h"
+#include "EventManager.h"
+#include "GameLobby.h"
+#include "ReplayInfo.h"
+#include "factories/AIFactory.h"
+#include "world/MapLoader.h"
+#include "helpers/format.hpp"
 #include <boost/container/static_vector.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/nowide/convert.hpp>
@@ -194,6 +202,8 @@ bool GameServer::Start(const CreateServerInfo& csi, const boost::filesystem::pat
         mapinfo.luaFilepath = luaFilePath;
     } else
         RTTR_Assert(mapinfo.luaFilepath.empty() && mapinfo.luaChecksum == 0);
+
+    //CreateLobby();
 
     // ab in die Konfiguration
     state = ServerState::Config;
@@ -399,6 +409,14 @@ void GameServer::Stop()
     mapinfo.Clear();
     countdown.Stop();
 
+    if(replayinfo)
+    {
+        if(replayinfo->replay.IsRecording())
+            replayinfo->replay.StopRecording();
+        replayinfo->replay.Close();
+        replayinfo.reset();
+    }
+
     // laden dicht machen
     serversocket.Close();
     // clear jump target
@@ -563,6 +581,12 @@ bool GameServer::StartGame()
     LOG.write("SERVER: Using networkframe length of %1% GFs (%2%)\n") % framesinfo.nwf_length
       % helpers::withUnit(framesinfo.nwf_length * framesinfo.gf_length);
 
+    // If we have a savegame, start at its first GF, else at 0
+    unsigned startGF = (mapinfo.type == MapType::Savegame) ? mapinfo.savegame->start_gf : 0;
+    // Create the game
+    game =
+      std::make_shared<Game>(std::move(ggs_), startGF, std::vector<PlayerInfo>(playerInfos.begin(), playerInfos.end()));
+
     for(unsigned id = 0; id < playerInfos.size(); id++)
     {
         if(playerInfos[id].isUsed())
@@ -576,6 +600,36 @@ bool GameServer::StartGame()
 
     state = ServerState::Loading;
     loadStartTime = SteadyClock::now();
+
+    GameWorld& gameWorld = game->world_;
+
+    RTTR_Assert(mapinfo.type != MapType::Savegame);
+    /// Startbündnisse setzen
+    for(unsigned i = 0; i < gameWorld.GetNumPlayers(); ++i)
+        gameWorld.GetPlayer(i).MakeStartPacts();
+
+    MapLoader loader(gameWorld);
+    if(!loader.Load(mapinfo.filepath)
+        || (!mapinfo.luaFilepath.empty() && !loader.LoadLuaScript(*game, *this, mapinfo.luaFilepath)))
+    {
+        OnError(ClientError::InvalidMap);
+        return false;
+    }
+    gameWorld.SetupResources();
+    
+    gameWorld.InitAfterLoad();
+
+    RTTR_Assert(!replayinfo);
+    StartReplayRecording(random_init);
+
+    for(unsigned id = 0; id < GetNumPlayers(); id++)
+    {
+        if(GetPlayer(id).ps == PlayerState::AI)
+        {
+            game->AddAIPlayer(CreateAIPlayer(id, GetPlayer(id).aiInfo));
+            SendNothingNC(id);
+        }
+    }
 
     return true;
 }
@@ -622,7 +676,7 @@ void GameServer::KickPlayer(uint8_t playerId, KickReason cause, uint32_t param)
     if(!playerInfo.isUsed())
         return;
     playerInfo.ps = PlayerState::Free;
-    playerInfo.isHost = false;
+    
 
     SendToAll(GameMessage_Player_Kicked(playerId, cause, param));
 
@@ -631,6 +685,27 @@ void GameServer::KickPlayer(uint8_t playerId, KickReason cause, uint32_t param)
     {
         playerInfo.ps = PlayerState::AI;
         playerInfo.aiInfo = AI::Info(AI::Type::Dummy);
+        auto old_host = playerInfo.name;
+
+        game->AddAIPlayer(CreateAIPlayer(playerId, playerInfo.aiInfo));
+        SendNothingNC(playerId);
+        if (playerInfo.isHost) {
+            //if host left, assign new host
+            const auto it = std::find_if(playerInfos.begin(), playerInfos.end(),
+                                         [](const auto& x) { return x.ps != PlayerState::AI; });
+            if (it == playerInfos.end()) {
+                LOG.write("All players disconnected, stopping server.\n");
+                Stop();
+                return;
+            }
+            unsigned new_host_playerId = unsigned(it - playerInfos.begin());
+            GameServerPlayer* player = GetNetworkPlayer(new_host_playerId);
+            player->sendMsgAsync(new GameMessage_UpdateIsHost(new_host_playerId, true));
+            LOG.write("Host %s disconnected. Setting host to %s\n") % old_host % it->name;
+            LOG.writeToFile("SERVER >>> CLIENT%d: NMS_PLAYER_ISHOST(%d)\n") % unsigned(new_host_playerId) % true;
+            it->isHost = true;
+        }
+        playerInfo.isHost = false;
     } else
         CancelCountdown();
 
@@ -702,8 +777,15 @@ void GameServer::ExecuteGameFrame()
             } else
                 ExecuteNWF();
         }
+
         // Advance GF
         ++currentGF;
+
+        //const unsigned curGF = GetGFNumber();
+        //bool isNWF = (curGF == nwfInfo.getNextNWF());
+        bool isNWF = (currentGF == nwfInfo.getNextNWF());
+        NextGF(isNWF);
+
         // Normally we set lastTime = curTime (== lastTime + passedTime) where passedTime is ideally 1 GF
         // But we might got called late, so we advance the time by 1 GF anyway so in that case we execute the next GF a
         // bit earlier. Exception: We lag many GFs behind, then we advance by the full passedTime - 1 GF which means we
@@ -738,6 +820,7 @@ void GameServer::ExecuteNWF()
             player.sendMsgAsync(new GameMessage_GetAsyncLog());
         }
     }
+    ExecuteNWFClient();
     const NWFServerInfo serverInfo = nwfInfo.getServerInfo();
     RTTR_Assert(serverInfo.gf == currentGF);
     RTTR_Assert(serverInfo.nextNWF > currentGF);
@@ -1785,6 +1868,10 @@ int GameServer::GetTargetPlayer(const GameMessageWithPlayer& msg)
     {
         if(msg.player < playerInfos.size() && (msg.player == msg.senderPlayerID || IsHost(msg.senderPlayerID)))
         {
+            if(playerInfos[msg.senderPlayerID].ps == PlayerState::AI)
+            {
+                return msg.senderPlayerID;
+            }
             GameServerPlayer* networkPlayer = GetNetworkPlayer(msg.senderPlayerID);
             if(networkPlayer->isActive())
                 return msg.player;
@@ -1811,4 +1898,209 @@ std::string GameServer::getHostPassword() {
 std::string GameServer::getPassword()
 {
     return config.password;
+}
+/*
+bool GameServer::CreateLobby()
+{
+    RTTR_Assert(!gameLobby);
+
+    unsigned numPlayers;
+
+    switch(mapinfo.type)
+    {
+        case MapType::OldMap:
+        {
+            libsiedler2::Archiv map;
+
+            // Karteninformationen laden
+            if(libsiedler2::loader::LoadMAP(mapinfo.filepath, map, true) != 0)
+            {
+                LOG.write("GameClient::OnMapData: ERROR: Map %1%, couldn't load header!\n") % mapinfo.filepath;
+                return false;
+            }
+
+            const libsiedler2::ArchivItem_Map_Header& header =
+              checkedCast<const libsiedler2::ArchivItem_Map*>(map.get(0))->getHeader();
+            numPlayers = header.getNumPlayers();
+            mapinfo.title = s25util::ansiToUTF8(header.getName());
+        }
+        break;
+        case MapType::Savegame:
+            mapinfo.savegame = std::make_unique<Savegame>();
+            if(!mapinfo.savegame->Load(mapinfo.filepath, SaveGameDataToLoad::HeaderAndSettings))
+                return false;
+
+            numPlayers = mapinfo.savegame->GetNumPlayers();
+            mapinfo.title = mapinfo.savegame->GetMapName();
+            break;
+        default: return false;
+    }
+
+    gameLobby = std::make_shared<GameLobby>(mapinfo.type == MapType::Savegame,  //IsHost()
+    true, numPlayers);
+    return true;
+}
+*/
+
+void GameServer::NextGF(bool wasNWF)
+{
+    for(AIPlayer& ai : game->aiPlayers_)
+        ai.RunGF(GetGFNumber(), wasNWF);
+    game->RunGF();
+}
+
+unsigned GameServer::GetGFNumber() const
+{
+    return game->em_->GetCurrentGF();
+}
+
+void GameServer::StartReplayRecording(const unsigned random_init)
+{
+    replayinfo = std::make_unique<ReplayInfo>();
+    replayinfo->filename = "s25server_" + config.ownerName +s25util::Time::FormatTime("%Y-%m-%d_%H-%i-%s") + ".rpl";
+    replayinfo->replay.random_init = random_init;
+
+    WritePlayerInfo(replayinfo->replay);
+    replayinfo->replay.ggs = game->ggs_;
+
+    // Datei speichern
+    if(!replayinfo->replay.StartRecording(RTTRCONFIG.ExpandPath(s25::folders::replays) / replayinfo->filename, mapinfo))
+    {
+        LOG.write(_("Replayfile couldn't be opened. No replay will be recorded\n"));
+        replayinfo.reset();
+    }
+}
+
+void GameServer::WritePlayerInfo(SavedFile& file)
+{
+    RTTR_Assert(state == ServerState::Loading || state == ServerState::Game);
+    // Spielerdaten
+    for(unsigned i = 0; i < GetNumPlayers(); ++i)
+        file.AddPlayer(GetPlayer(i));
+}
+
+unsigned GameServer::GetNumPlayers() const
+{
+    RTTR_Assert(state == ServerState::Loading || state == ServerState::Game);
+    return game->world_.GetNumPlayers();
+}
+
+GamePlayer& GameServer::GetPlayer(const unsigned id)
+{
+    RTTR_Assert(state == ServerState::Loading || state == ServerState::Game);
+    RTTR_Assert(id < GetNumPlayers());
+    return game->world_.GetPlayer(id);
+}
+
+void GameServer::SendNothingNC(uint8_t playerId)
+{
+    GameMessage_GameCommand* nc =
+      new GameMessage_GameCommand(playerId, AsyncChecksum::create(*game), std::vector<gc::GameCommandPtr>());
+    nc->run(this, playerId);
+    //NetworkPlayer* player = GetNetworkPlayer(playerId);
+    //player->sendMsgAsync(nc);
+}
+
+std::unique_ptr<AIPlayer> GameServer::CreateAIPlayer(unsigned playerId, const AI::Info& aiInfo)
+{
+    return AIFactory::Create(aiInfo, playerId, game->world_);
+}
+
+/// Wandelt eine GF-Angabe in eine Zeitangabe um (HH:MM:SS oder MM:SS wenn Stunden = 0)
+std::string GameServer::FormatGFTime(const unsigned gf) const
+{
+    using seconds = std::chrono::duration<uint32_t, std::chrono::seconds::period>;
+    using hours = std::chrono::duration<uint32_t, std::chrono::hours::period>;
+    using minutes = std::chrono::duration<uint32_t, std::chrono::minutes::period>;
+    using std::chrono::duration_cast;
+
+    // In Sekunden umrechnen
+    seconds numSeconds = duration_cast<seconds>(gf * SPEED_GF_LENGTHS[referenceSpeed]);
+
+    // Angaben rausfiltern
+    hours numHours = duration_cast<hours>(numSeconds);
+    numSeconds -= numHours;
+    minutes numMinutes = duration_cast<minutes>(numSeconds);
+    numSeconds -= numMinutes;
+
+    // ganze Stunden mit dabei? Dann entsprechend anderes format, ansonsten ignorieren wir die einfach
+    if(numHours.count())
+        return helpers::format("%u:%02u:%02u", numHours.count(), numMinutes.count(), numSeconds.count());
+    else
+        return helpers::format("%02u:%02u", numMinutes.count(), numSeconds.count());
+}
+
+void GameServer::SystemChat(const std::string& text)
+{
+    SystemChat(text, GetPlayerId());
+}
+
+void GameServer::SystemChat(const std::string& text, unsigned char fromPlayerIdx)
+{
+    //if(ci)
+    //    ci->CI_Chat(fromPlayerIdx, ChatDestination::System, text);
+    LOG.write(text.c_str());
+}
+
+void GameServer::OnError(ClientError error)
+{
+    //if(ci)
+    //    ci->CI_Error(error);
+    auto text = ClientErrorToStr(error);
+    LOG.writeToFile(text);
+    LOG.write(text);
+    Stop();
+}
+
+void GameServer::ExecuteNWFClient()
+{
+    // Geschickte Network Commands der Spieler ausführen und ggf. im Replay aufzeichnen
+
+    AsyncChecksum checksum = AsyncChecksum::create(*game);
+    const unsigned curGF = GetGFNumber();
+
+    for(const NWFPlayerInfo& player : nwfInfo.getPlayerInfos())
+    {
+        const PlayerGameCommands& currentGCs = player.commands.front();
+
+        // Command im Replay aufzeichnen (wenn nicht gerade eins schon läuft xD)
+        // Nur Commands reinschreiben, KEINE PLATZHALTER (nc_count = 0)
+        if(!currentGCs.gcs.empty() && replayinfo && replayinfo->replay.IsRecording())
+        {
+            // Set the current checksum as the GF checksum. The checksum from the command is from the last NWF!
+            PlayerGameCommands replayCmds(checksum, currentGCs.gcs);
+            replayinfo->replay.AddGameCommand(curGF, player.id, replayCmds);
+        }
+
+        // Das ganze Zeug soll die andere Funktion ausführen
+        ExecuteAllGCs(player.id, currentGCs);
+    }
+
+    // Send GC message for this NWF
+    // First for all potential AIs as we need to combine the AI cmds of the local player with our own ones
+    for(AIPlayer& ai : game->aiPlayers_)
+    {
+        const std::vector<gc::GameCommandPtr> aiGCs = ai.FetchGameCommands();
+        /// Cmds from own AI get added to our gcs
+        //if(ai.GetPlayerId() == GetPlayerId())
+        //    gameCommands_.insert(gameCommands_.end(), aiGCs.begin(), aiGCs.end());
+        //else
+        //    mainPlayer.sendMsgAsync(new GameMessage_GameCommand(ai.GetPlayerId(), checksum, aiGCs));
+        GameMessage_GameCommand* ai_gc = new GameMessage_GameCommand(ai.GetPlayerId(), checksum, aiGCs);
+        ai_gc->run(this, ai.GetPlayerId());
+        for(auto& msg : ai.getAIInterface().FetchChatMessages())
+        {
+            // mainPlayer.sendMsgAsync(msg.release());
+            auto ai_cmd = msg.release();
+            ai_cmd->run(this, ai.GetPlayerId());
+        }
+    }
+    //mainPlayer.sendMsgAsync(new GameMessage_GameCommand(0xFF, checksum, gameCommands_));
+    //gameCommands_.clear();
+}
+
+void GameServer::ExecuteAllGCs(uint8_t playerId, const PlayerGameCommands& gcs)
+{
+    for(const gc::GameCommandPtr& gc : gcs.gcs)
+        gc->Execute(game->world_, playerId);
 }

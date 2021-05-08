@@ -118,11 +118,10 @@ bool GameClient::HostGame(const CreateServerInfo& csi, const boost::filesystem::
 {
     std::string hostPw = createRandString(20);
     //std::string hostPw = csi.password;
-    bool autoconnect = csi.autoconnect;
     LOG.write("hostPw:%s\n") % hostPw;
     if(!GAMESERVER.Start(csi, map_path, map_type, hostPw))
         return false;
-    if(!autoconnect)
+    if(!csi.autoconnect)
         return true;
     return Connect("localhost", hostPw, csi.type, csi.port, true, csi.ipv6);
 }
@@ -338,6 +337,7 @@ void GameClient::GameLoaded()
         OnGameStart();
     else
     {
+        /*
         // Notify server that we are ready
         if(IsHost())
         {
@@ -350,6 +350,7 @@ void GameClient::GameLoaded()
                 }
             }
         }
+        */
         SendNothingNC();
     }
 }
@@ -604,6 +605,7 @@ bool GameClient::OnGameMessage(const GameMessage_Player_Kicked& msg)
         gameLobby->getPlayer(msg.player).ps = PlayerState::Free;
     } else if(state == ClientState::Loading || state == ClientState::Loaded || state == ClientState::Game)
     {
+        /*
         // Im Spiel anzeigen, dass der Spieler das Spiel verlassen hat
         GamePlayer& player = GetPlayer(msg.player);
         if(player.ps != PlayerState::AI)
@@ -617,6 +619,7 @@ bool GameClient::OnGameMessage(const GameMessage_Player_Kicked& msg)
                 SendNothingNC(msg.player);
             }
         }
+        */
     } else
         return true;
 
@@ -865,12 +868,13 @@ bool GameClient::OnGameMessage(const GameMessage_Countdown& msg)
 bool GameClient::OnGameMessage(const GameMessage_UpdateIsHost& msg)
 {
     LOG.writeToFile("<<< NMS_PLAYER_ISHOST(%u) isHost=%d\n") % unsigned(msg.player) % msg.isHost;
-    if(state != ClientState::Connect)
+    if(state == ClientState::Stopped)
         return true;
 
-    if(msg.player != mainPlayer.playerId)
+    if (msg.player != mainPlayer.playerId) {
         return true;
-
+    }
+        
     clientconfig.isHost = msg.isHost;
 
     //if(ci)

@@ -374,7 +374,7 @@ bool InitDirectories()
 {
     // Note: Do not use logger yet. Filepath may not exist
     const auto curPath = bfs::current_path();
-    LOG.write("Starting in %s\n", LogTarget::Stdout) % curPath;
+    LOG.write("Starting s25server in %s\n", LogTarget::Stdout) % curPath;
 
     // diverse dirs anlegen
     const std::array<std::string, 10> dirs = {
@@ -410,7 +410,7 @@ bool InitDirectories()
     {
         LOG.open();
         LOG.write("%1%\n\n", LogTarget::File) % GetProgramDescription();
-        LOG.write("Starting in %s\n", LogTarget::File) % curPath;
+        LOG.write("Starting s25server in %s\n", LogTarget::File) % curPath;
     } catch(const std::exception& e)
     {
         LOG.write("Error initializing log: %1%\nSystem reports: %2%\n", LogTarget::Stderr) % e.what()

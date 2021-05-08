@@ -104,7 +104,7 @@ bool GameManagerServer::Run()
     LOBBYCLIENT.Run();
 
     // Get this before the run so we know if we are currently skipping
-    const unsigned targetSkipGF = GAMECLIENT.skiptogf;
+    //const unsigned targetSkipGF = GAMECLIENT.skiptogf;
     GAMECLIENT.Run();
     GAMESERVER.Run();
     /*
