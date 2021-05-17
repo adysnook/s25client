@@ -4,7 +4,7 @@
 
 #pragma once
 
-//#include "driver/VideoMode.h"
+#include "driver/VideoMode.h"
 #include "s25util/ProxySettings.h"
 #include "s25util/Singleton.h"
 #include <boost/optional.hpp>
@@ -20,12 +20,12 @@ bool checkPort(int port);
 } // namespace validate
 
 /// Configuration class
-class SettingsServer : public Singleton<SettingsServer, SingletonPolicies::WithLongevity>
+class SettingsHosting : public Singleton<SettingsHosting, SingletonPolicies::WithLongevity>
 {
 public:
     static constexpr unsigned Longevity = 18;
 
-    SettingsServer();
+    SettingsHosting();
 
     void Load();
     void Save();
@@ -41,21 +41,31 @@ public:
         bool debugMode;
     } global;
 
-    //struct
-    //{
-    //    std::string language;
-    //} language;
-
-    ProxySettings proxy;
+    struct
+    {
+        std::string language;
+    } language;
 
     struct
     {
-        std::map<unsigned, unsigned> configuration;
-    } addons;
+        std::string name;
+        std::string password;
+        bool save_password;
+        uint32_t retry_interval;
+    } lobby;
+
+    struct
+    {
+        uint16_t portStart;
+        uint16_t portEnd;
+        bool ipv6; /// listen/connect on ipv6 as default or not
+    } server;
+
+    ProxySettings proxy;
 
 private:
     static const int VERSION;
-    static const std::array<std::string, 3> SECTION_NAMES;
+    static const std::array<std::string, 5> SECTION_NAMES;
 };
 
-#define SETTINGS_SERVER SettingsServer::inst()
+#define SETTINGS_HOSTING SettingsHosting::inst()

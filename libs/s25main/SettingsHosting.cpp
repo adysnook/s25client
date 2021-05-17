@@ -2,41 +2,51 @@
 //
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "SettingsServer.h"
+#include "SettingsHosting.h"
 #include "RTTR_Version.h"
 #include "RttrConfig.h"
-//#include "drivers/AudioDriverWrapper.h"
-//#include "drivers/VideoDriverWrapper.h"
+#include "drivers/AudioDriverWrapper.h"
+#include "drivers/VideoDriverWrapper.h"
 #include "files.h"
 #include "helpers/strUtils.h"
-//#include "languages.h"
+#include "languages.h"
 #include "libsiedler2/ArchivItem_Ini.h"
 #include "libsiedler2/ArchivItem_Text.h"
 #include "libsiedler2/libsiedler2.h"
 #include "s25util/StringConversion.h"
 #include "s25util/System.h"
 #include "s25util/error.h"
-#include <boost/dll/shared_library.hpp>
-#include <boost/filesystem/path.hpp>
-#include <string>
-#include <type_traits>
-#include <utility>
-#include <vector>
 #include <boost/filesystem/operations.hpp>
 
-namespace bfs = boost::filesystem;
+const int SettingsHosting::VERSION = 1;
+const std::array<std::string, 5> SettingsHosting::SECTION_NAMES = {
+  {"global", "language", "lobby", "server", "proxy"}};
 
-const int SettingsServer::VERSION = 7;
-const std::array<std::string, 3> SettingsServer::SECTION_NAMES = {
-  {"global"/*, "language"*/, "proxy", "addons"}};
+/* already defined in Settings.cpp
+namespace validate {
+boost::optional<uint16_t> checkPort(const std::string& port)
+{
+    int32_t iPort;
+    if((helpers::tryFromString(port, iPort) || s25util::tryFromStringClassic(port, iPort)) && checkPort(iPort))
+        return static_cast<uint16_t>(iPort);
+    else
+        return boost::none;
+}
+bool checkPort(int port)
+{
+    // Disallow port 0 as it may cause problems
+    return port > 0 && port <= 65535;
+}
+} // namespace validate
+*/
 
 
-SettingsServer::SettingsServer() //-V730
+SettingsHosting::SettingsHosting() //-V730
 {
     LoadDefaults();
 }
 
-void SettingsServer::LoadDefaults()
+void SettingsHosting::LoadDefaults()
 {
     // global
     // {
@@ -46,30 +56,39 @@ void SettingsServer::LoadDefaults()
     global.debugMode = false;
     // }
 
-
     // language
     // {
-    //language.language.clear();
+    language.language.clear();
     // }
 
-    //LANGUAGES.setLanguage(language.language);
+    LANGUAGES.setLanguage(language.language);
+
+    // lobby
+    // {
+
+    lobby.name = "";
+    lobby.password.clear();
+    lobby.save_password = false;
+    lobby.retry_interval = 10000; //10s
+    // }
+
+    // server
+    // {
+    server.portStart = 36650;
+    server.portEnd = 37650;
+    server.ipv6 = false;
+    // }
 
     proxy = ProxySettings();
     proxy.port = 1080;
-
- 
-    // addons
-    // {
-    addons.configuration.clear();
-    // }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Routine zum Laden der Konfiguration
-void SettingsServer::Load()
+void SettingsHosting::Load()
 {
     libsiedler2::Archiv settings;
-    const auto settingsPath = RTTRCONFIG.ExpandPath(s25::resources::config_server);
+    const auto settingsPath = RTTRCONFIG.ExpandPath(s25::resources::config_hosting);
     try
     {
         if(libsiedler2::Load(settingsPath, settings) != 0 /*|| settings.size() != SECTION_NAMES.size()*/)
@@ -77,14 +96,15 @@ void SettingsServer::Load()
 
         const libsiedler2::ArchivItem_Ini* iniGlobal =
           static_cast<libsiedler2::ArchivItem_Ini*>(settings.find("global"));
-        //const libsiedler2::ArchivItem_Ini* iniLanguage =
-        //  static_cast<libsiedler2::ArchivItem_Ini*>(settings.find("language"));
+        const libsiedler2::ArchivItem_Ini* iniLanguage =
+          static_cast<libsiedler2::ArchivItem_Ini*>(settings.find("language"));
+        const libsiedler2::ArchivItem_Ini* iniLobby = static_cast<libsiedler2::ArchivItem_Ini*>(settings.find("lobby"));
+        const libsiedler2::ArchivItem_Ini* iniServer =
+          static_cast<libsiedler2::ArchivItem_Ini*>(settings.find("server"));
         const libsiedler2::ArchivItem_Ini* iniProxy = static_cast<libsiedler2::ArchivItem_Ini*>(settings.find("proxy"));
-        const libsiedler2::ArchivItem_Ini* iniAddons =
-          static_cast<libsiedler2::ArchivItem_Ini*>(settings.find("addons"));
 
         // ist eine der Kategorien nicht vorhanden?
-        if(!iniGlobal /*|| !iniLanguage*/ || !iniProxy || !iniAddons)
+        if(!iniGlobal || !iniLanguage || !iniLobby || !iniServer || !iniProxy)
         {
             throw std::runtime_error("Missing section");
         }
@@ -108,10 +128,27 @@ void SettingsServer::Load()
 
         // language
         // {
-        //language.language = iniLanguage->getValue("language");
+        language.language = iniLanguage->getValue("language");
         // }
 
-        //LANGUAGES.setLanguage(language.language);
+        LANGUAGES.setLanguage(language.language);
+
+        // lobby
+        // {
+        lobby.name = iniLobby->getValue("name");
+        lobby.password = iniLobby->getValue("password");
+        lobby.save_password = (iniLobby->getValueI("save_password") != 0);
+        lobby.retry_interval = iniLobby->getValueI("retry_interval");
+        // }
+
+        // server
+        // {
+        boost::optional<uint16_t> port_start = validate::checkPort(iniServer->getValue("port_start"));
+        server.portStart = port_start.value_or(36650);
+        boost::optional<uint16_t> port_end = validate::checkPort(iniServer->getValue("port_end"));
+        server.portEnd = port_end.value_or(37650);
+        server.ipv6 = (iniServer->getValueI("ipv6") != 0);
+        // }
 
         // proxy
         // {
@@ -129,20 +166,8 @@ void SettingsServer::Load()
             proxy.hostname.clear();
         }
         // aktivierter Socks v4 deaktiviert ipv6
-        //else if(proxy.type == ProxyType::Socks4 && global.ipv6)
-        //    global.ipv6 = false;
-
-        // addons
-        // {
-        for(unsigned addon = 0; addon < iniAddons->size(); ++addon)
-        {
-            const auto* item = dynamic_cast<const libsiedler2::ArchivItem_Text*>(iniAddons->get(addon));
-
-            if(item)
-                addons.configuration.insert(std::make_pair(s25util::fromStringClassic<unsigned>(item->getName()),
-                                                           s25util::fromStringClassic<unsigned>(item->getText())));
-        }
-        // }
+        //else if(proxy.type == ProxyType::Socks4 && server.ipv6)
+        //    server.ipv6 = false;
 
     } catch(std::runtime_error& e)
     {
@@ -155,7 +180,7 @@ void SettingsServer::Load()
 
 ///////////////////////////////////////////////////////////////////////////////
 // Routine zum Speichern der Konfiguration
-void SettingsServer::Save()
+void SettingsHosting::Save()
 {
     libsiedler2::Archiv settings;
     settings.alloc(SECTION_NAMES.size());
@@ -163,12 +188,13 @@ void SettingsServer::Save()
         settings.set(i, std::make_unique<libsiedler2::ArchivItem_Ini>(SECTION_NAMES[i]));
 
     libsiedler2::ArchivItem_Ini* iniGlobal = static_cast<libsiedler2::ArchivItem_Ini*>(settings.find("global"));
-    //libsiedler2::ArchivItem_Ini* iniLanguage = static_cast<libsiedler2::ArchivItem_Ini*>(settings.find("language"));
+    libsiedler2::ArchivItem_Ini* iniLanguage = static_cast<libsiedler2::ArchivItem_Ini*>(settings.find("language"));
+    libsiedler2::ArchivItem_Ini* iniLobby = static_cast<libsiedler2::ArchivItem_Ini*>(settings.find("lobby"));
+    libsiedler2::ArchivItem_Ini* iniServer = static_cast<libsiedler2::ArchivItem_Ini*>(settings.find("server"));
     libsiedler2::ArchivItem_Ini* iniProxy = static_cast<libsiedler2::ArchivItem_Ini*>(settings.find("proxy"));
-    libsiedler2::ArchivItem_Ini* iniAddons = static_cast<libsiedler2::ArchivItem_Ini*>(settings.find("addons"));
 
     // ist eine der Kategorien nicht vorhanden?
-    RTTR_Assert(iniGlobal /*&& iniLanguage*/ && iniProxy && iniAddons);
+    RTTR_Assert(iniGlobal && iniLanguage && iniLobby && iniServer && iniProxy);
 
     // global
     // {
@@ -181,7 +207,22 @@ void SettingsServer::Save()
 
     // language
     // {
-    //iniLanguage->setValue("language", language.language);
+    iniLanguage->setValue("language", language.language);
+    // }
+
+    // lobby
+    // {
+    iniLobby->setValue("name", lobby.name);
+    iniLobby->setValue("password", lobby.password);
+    iniLobby->setValue("save_password", (lobby.save_password ? 1 : 0));
+    iniLobby->setValue("retry_interval", lobby.retry_interval);
+    // }
+
+    // server
+    // {
+    iniServer->setValue("port_start", server.portStart);
+    iniServer->setValue("port_end", server.portEnd);
+    iniServer->setValue("ipv6", (server.ipv6 ? 1 : 0));
     // }
 
     // proxy
@@ -191,14 +232,7 @@ void SettingsServer::Save()
     iniProxy->setValue("typ", static_cast<int>(proxy.type));
     // }
 
-    // addons
-    // {
-    iniAddons->clear();
-    for(const auto& it : addons.configuration)
-        iniAddons->addValue(s25util::toStringClassic(it.first), s25util::toStringClassic(it.second));
-    // }
-
-    bfs::path settingsPath = RTTRCONFIG.ExpandPath(s25::resources::config_server);
+    bfs::path settingsPath = RTTRCONFIG.ExpandPath(s25::resources::config_hosting);
     if(libsiedler2::Write(settingsPath, settings) == 0)
         bfs::permissions(settingsPath, bfs::owner_read | bfs::owner_write);
 }

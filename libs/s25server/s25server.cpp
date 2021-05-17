@@ -4,16 +4,16 @@
 
 #include "Debug.h"
 #include "GameManagerServer.h"
-#include "QuickStartGame.h"
+#include "QuickStartGameServer.h"
 #include "RTTR_AssertError.h"
 #include "RTTR_Version.h"
 #include "RttrConfig.h"
 #include "SettingsServer.h"
 #include "SignalHandler.h"
-#include "WindowManager.h"
+//#include "WindowManager.h"
 #include "commands.h"
-#include "drivers/AudioDriverWrapper.h"
-#include "drivers/VideoDriverWrapper.h"
+//#include "drivers/AudioDriverWrapper.h"
+//#include "drivers/VideoDriverWrapper.h"
 #include "files.h"
 #include "helpers/format.hpp"
 #include "mygettext/mygettext.h"
@@ -24,13 +24,13 @@
 #include "s25util/StringConversion.h"
 #include "s25util/System.h"
 #include "s25util/error.h"
-#include "liblobby/LobbyClient.h"
-#include "liblobby/LobbyInterface.h"
+//#include "liblobby/LobbyClient.h"
+//#include "liblobby/LobbyInterface.h"
 #include "Loader.h"
 #include "gameData/ApplicationLoader.h"
 #include "s25util/MyTime.h"
 #include "s25util/colors.h"
-#include "controls/ctrlChat.h"
+//#include "controls/ctrlChat.h"
 #include "network/GameServer.h"
 #include <boost/filesystem.hpp>
 #include <boost/nowide/args.hpp>
@@ -191,8 +191,8 @@ void handleException(void* pCtx = nullptr) noexcept
         LOG.write("%1%", target) % ss.str();
         if(shouldSendDebugData())
         {
-            DebugInfo di;
-            di.SendReplay();
+            DebugInfo di(SETTINGS_SERVER.proxy, GAMESERVER.GetGFNumber());
+            di.SendReplay(GAMESERVER.GetReplay());
             di.SendStackTrace(stacktrace);
         }
     } catch(...)
@@ -420,7 +420,7 @@ bool InitDirectories()
     return true;
 }
 
-bool InitGame(GameManagerServer& gameManagerServer)
+bool InitGameServer(GameManagerServer& gameManagerServer)
 {
     libsiedler2::setAllocator(new GlAllocator());
 
@@ -443,6 +443,9 @@ bool InitGame(GameManagerServer& gameManagerServer)
 
 int RunProgram(po::variables_map& options)
 {
+    //int pid = getpid();
+
+
     LOG.write("%1%\n\n", LogTarget::Stdout) % GetProgramDescription();
     if(!LocaleHelper::init())
         return 1;
@@ -459,82 +462,48 @@ int RunProgram(po::variables_map& options)
     // (spielentscheidende) wird unser Generator verwendet)
     srand(static_cast<unsigned>(std::time(nullptr)));
 
-    /*
-    if(options.count("convert-sounds"))
-    {
-        try
-        {
-            convertAndSaveSounds(RTTRCONFIG, RTTRCONFIG.ExpandPath("<RTTR_USERDATA>/convertedSoundeffects"));
-            return 0;
-        } catch(const std::runtime_error& e)
-        {
-            bnw::cerr << "Error: " << e.what() << "\n";
-            return 1;
-        }
-    }
-    */
-
-    //SetGlobalInstanceWrapper<GameManager> gameManager(setGlobalGameManager, LOG, SETTINGS, VIDEODRIVER, AUDIODRIVER,
-    //                                                  WINDOWMANAGER);
-
     SetGlobalInstanceWrapper<GameManagerServer> gameManagerServer(setGlobalGameManagerServer, LOG, SETTINGS_SERVER);
 
 
     try
     {
-        if(!InitGame(gameManagerServer))
+        if(!InitGameServer(gameManagerServer))
             return 2;
 
-        //if(options.count("map") && !QuickStartGame(options["map"].as<std::string>()))
-        //    return 1;
+        if (!options.count("map") || !options.count("port")) {
+            LOG.write("Map and Port are required!\n");
+            return 1;
+        }
+        auto map = options["map"].as<std::string>();
+        auto port = options["port"].as<std::string>();
+        std::string owner = "";
+        bool ipv6 = false;
+
+        if(options.count("owner"))
+            owner = options["owner"].as<std::string>();
+        if(options.count("ipv6"))
+            ipv6 = options["ipv6"].as<bool>();
+
+        LOG.write("map:%s\n") % map;
+        LOG.write("port:%s\n") % port;
+        LOG.write("owner:%s\n") % owner;
+        LOG.write("ipv6:%s\n") % ipv6;
+
+        LOG.write(_("\nStarting the server\n"));
 
         // Hauptschleife
         ApplicationLoader loader(RTTRCONFIG, LOADER, LOG, "");
         if(!loader.load(true))
             return 4;
-        LOBBYCLIENT.SetProgramVersion(RTTR_Version::GetReadableVersion());
-        if(!LOBBYCLIENT.Login(LOADER.GetTextN("client", 0),
-                              s25util::fromStringClassic<unsigned>(LOADER.GetTextN("client", 1)), "adysnookhostbot", "adysnooktest",
-                              SETTINGS_SERVER.server.ipv6))
+
+        if(SETTINGS_SERVER.proxy.type == ProxyType::Socks4 && ipv6)
         {
-            return 3;
+            ipv6 = false;
+            LOG.write("Disabling ipv6 because of ProxyType Socks4");
         }
-        class : public LobbyInterface
-        {
-        public:
-            void LC_Chat(const std::string& player, const std::string& text)
-            {
-                unsigned player_color = ctrlChat::CalcUniqueColor(player);
 
-                std::string time_string = s25util::Time::FormatTime("(%H:%i:%s)");
-                auto msg_color = COLOR_YELLOW;
-
-                //GetCtrl<ctrlChat>(ID_Chat)->AddMessage(time, player, playerColor, text, COLOR_YELLOW);
-                // Loggen
-                LOG.write("%s <") % time_string;
-                LOG.writeColored("%1%", player_color) % player;
-                LOG.write(">: ");
-                LOG.writeColored("%1%", msg_color) % text;
-                LOG.write("\n");
-
-                if(text.substr(0, 6) == ".host ")
-                {
-                    std::string map_name = "RTTR\\MAPS\\NEW\\" + text.substr(7);
-                    std::string response_msg;
-                    if(QuickStartGame(map_name, player))
-                    {
-                        response_msg = "Game created for owner " + player + " with map " + map_name
-                                       + ". Password:" + GAMESERVER.getPassword();
-                    } else
-                    {
-                        response_msg = "Error creating game with map " + map_name;
-                    }
-                    LOBBYCLIENT.SendChat(response_msg);
-                }
-            };
-        } callback_obj;
-        LOBBYCLIENT.AddListener(&callback_obj);
-        
+        if(!QuickStartGameServer(map, uint16_t(std::stoul(port)), owner, ipv6))
+            return 10;
 
         while(gameManagerServer.Run())
         {
@@ -581,12 +550,17 @@ int main(int argc, char** argv)
     desc.add_options()
         ("help,h", "Show help")
         ("map,m", po::value<std::string>(),"Map to load")
+        ("owner,o", po::value<std::string>(),"Host owner")
+        ("port,p", po::value<std::string>(),"Port")
+        ("ipv6",  po::value<bool>(),"Enable IPv6")
         ("version", "Show version information and exit")
-        ("convert-sounds", "Convert sounds and exit")
         ;
     // clang-format on
     po::positional_options_description positionalOptions;
     positionalOptions.add("map", 1);
+    positionalOptions.add("owner", 1);
+    positionalOptions.add("port", 1);
+    positionalOptions.add("ipv6", 1);
 
     po::variables_map options;
     try

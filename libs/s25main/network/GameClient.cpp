@@ -117,13 +117,8 @@ bool GameClient::Connect(const std::string& server, const std::string& password,
 bool GameClient::HostGame(const CreateServerInfo& csi, const boost::filesystem::path& map_path, MapType map_type)
 {
     std::string hostPw = createRandString(20);
-    //std::string hostPw = csi.password;
-    LOG.write("hostPw:%s\n") % hostPw;
-    if(!GAMESERVER.Start(csi, map_path, map_type, hostPw))
-        return false;
-    if(!csi.autoconnect)
-        return true;
-    return Connect("localhost", hostPw, csi.type, csi.port, true, csi.ipv6);
+    return GAMESERVER.Start(csi, map_path, map_type, hostPw)
+           && Connect("localhost", hostPw, csi.type, csi.port, true, csi.ipv6);
 }
 
 /**

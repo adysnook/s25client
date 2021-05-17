@@ -5,7 +5,9 @@
 #pragma once
 
 #include "FrameCounter.h"
+#include "liblobby/LobbyInterface.h"
 #include <boost/optional.hpp>
+#include "FramesInfo.h"
 
 class Log;
 class SettingsServer;

@@ -3,17 +3,17 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "Debug.h"
-#include "GameManager.h"
-#include "QuickStartGame.h"
+#include "GameManagerHosting.h"
+#include "QuickStartGameServer.h"
 #include "RTTR_AssertError.h"
 #include "RTTR_Version.h"
 #include "RttrConfig.h"
-#include "Settings.h"
+#include "SettingsHosting.h"
 #include "SignalHandler.h"
 #include "WindowManager.h"
 #include "commands.h"
 #include "drivers/AudioDriverWrapper.h"
-#include "drivers/VideoDriverWrapper.h"
+//#include "drivers/VideoDriverWrapper.h"
 #include "files.h"
 #include "helpers/format.hpp"
 #include "mygettext/mygettext.h"
@@ -24,7 +24,14 @@
 #include "s25util/StringConversion.h"
 #include "s25util/System.h"
 #include "s25util/error.h"
-#include <network/GameClient.h>
+#include "liblobby/LobbyClient.h"
+#include "liblobby/LobbyInterface.h"
+#include "Loader.h"
+#include "gameData/ApplicationLoader.h"
+#include "s25util/MyTime.h"
+#include "s25util/colors.h"
+#include "controls/ctrlChat.h"
+#include "network/GameServer.h"
 #include <boost/filesystem.hpp>
 #include <boost/nowide/args.hpp>
 #include <boost/nowide/iostream.hpp>
@@ -139,7 +146,7 @@ bool askForDebugData()
 }
 bool shouldSendDebugData()
 {
-    return (SETTINGS.global.submit_debug_data == 1) || askForDebugData();
+    return (SETTINGS_HOSTING.global.submit_debug_data == 1) || askForDebugData();
 }
 
 void showCrashMessage()
@@ -184,9 +191,8 @@ void handleException(void* pCtx = nullptr) noexcept
         LOG.write("%1%", target) % ss.str();
         if(shouldSendDebugData())
         {
-            DebugInfo di(SETTINGS.proxy, GAMECLIENT.GetGFNumber());
-            if(!GAMECLIENT.IsReplayModeOn())
-                di.SendReplay(GAMECLIENT.GetReplay());
+            DebugInfo di(SETTINGS_HOSTING.proxy, -1);
+            //di.SendReplay();
             di.SendStackTrace(stacktrace);
         }
     } catch(...)
@@ -368,7 +374,7 @@ bool InitDirectories()
 {
     // Note: Do not use logger yet. Filepath may not exist
     const auto curPath = bfs::current_path();
-    LOG.write("Starting in %s\n", LogTarget::Stdout) % curPath;
+    LOG.write("Starting s25hosting in %s\n", LogTarget::Stdout) % curPath;
 
     // diverse dirs anlegen
     const std::array<std::string, 10> dirs = {
@@ -404,7 +410,7 @@ bool InitDirectories()
     {
         LOG.open();
         LOG.write("%1%\n\n", LogTarget::File) % GetProgramDescription();
-        LOG.write("Starting in %s\n", LogTarget::File) % curPath;
+        LOG.write("Starting s25hosting in %s\n", LogTarget::File) % curPath;
     } catch(const std::exception& e)
     {
         LOG.write("Error initializing log: %1%\nSystem reports: %2%\n", LogTarget::Stderr) % e.what()
@@ -414,7 +420,7 @@ bool InitDirectories()
     return true;
 }
 
-bool InitGame(GameManager& gameManager)
+bool InitGameServer(GameManagerHosting& gameManagerHosting)
 {
     libsiedler2::setAllocator(new GlAllocator());
 
@@ -427,7 +433,7 @@ bool InitGame(GameManager& gameManager)
     }
 
     // Spiel starten
-    if(!gameManager.Start())
+    if(!gameManagerHosting.Start())
     {
         s25util::error("Failed to start the game");
         return false;
@@ -451,42 +457,32 @@ int RunProgram(po::variables_map& options)
 
     // Zufallsgenerator initialisieren (Achtung: nur für Animations-Offsets interessant, für alles andere
     // (spielentscheidende) wird unser Generator verwendet)
-    srand(static_cast<unsigned>(std::time(nullptr)));
+    srand(static_cast<unsigned>(std::time(nullptr))); 
 
-    if(options.count("convert-sounds"))
-    {
-        try
-        {
-            convertAndSaveSounds(RTTRCONFIG, RTTRCONFIG.ExpandPath("<RTTR_USERDATA>/convertedSoundeffects"));
-            return 0;
-        } catch(const std::runtime_error& e)
-        {
-            bnw::cerr << "Error: " << e.what() << "\n";
-            return 1;
-        }
-    }
+    SetGlobalInstanceWrapper<GameManagerHosting> gameManagerHosting(setGlobalGameManagerHosting, LOG, SETTINGS_HOSTING);
 
-    SetGlobalInstanceWrapper<GameManager> gameManager(setGlobalGameManager, LOG, SETTINGS, VIDEODRIVER, AUDIODRIVER,
-                                                      WINDOWMANAGER);
     try
     {
-        if(!InitGame(gameManager))
+        if(!InitGameServer(gameManagerHosting))
             return 2;
 
-        if(options.count("map") && !QuickStartGame(options["map"].as<std::string>()))
-            return 1;
+        LOG.write(_("\nStarting the hosting server\n"));
 
         // Hauptschleife
+        ApplicationLoader loader(RTTRCONFIG, LOADER, LOG, "");
+        if(!loader.load(true))
+            return 4;
 
-        while(gameManager.Run())
+        while(gameManagerHosting.Run())
         {
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
 #ifndef _WIN32
             killme = false;
 #endif // !_WIN32
         }
 
         // Spiel beenden
-        gameManager.Stop();
+        gameManagerHosting.Stop();
         libsiedler2::setAllocator(nullptr);
     } catch(RTTR_AssertError& error)
     {
@@ -521,13 +517,10 @@ int main(int argc, char** argv)
     // clang-format off
     desc.add_options()
         ("help,h", "Show help")
-        ("map,m", po::value<std::string>(),"Map to load")
         ("version", "Show version information and exit")
-        ("convert-sounds", "Convert sounds and exit")
         ;
     // clang-format on
     po::positional_options_description positionalOptions;
-    positionalOptions.add("map", 1);
 
     po::variables_map options;
     try

@@ -56,7 +56,8 @@ namespace resources {
     constexpr auto boot_z = "<RTTR_GAME>/DATA/BOOT_Z.LST";
     constexpr auto carrier = "<RTTR_GAME>/DATA/BOBS/CARRIER.BOB";
     constexpr auto config = "<RTTR_CONFIG>/CONFIG.INI"; // main config file
-    //constexpr auto config_server = "<RTTR_CONFIG>/CONFIG_SERVER.INI"; // main config file
+    constexpr auto config_server = "<RTTR_CONFIG>/CONFIG_SERVER.INI"; // dedicated server config file
+    constexpr auto config_hosting = "<RTTR_CONFIG>/CONFIG_HOSTING.INI"; // hosting provider config file
     constexpr auto io = "<RTTR_GAME>/DATA/IO/IO.DAT";
     constexpr auto jobs = "<RTTR_GAME>/DATA/BOBS/JOBS.BOB";
     constexpr auto mis0bobs = "<RTTR_GAME>/DATA/MIS0BOBS.LST";

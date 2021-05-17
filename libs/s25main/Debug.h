@@ -9,6 +9,7 @@
 #include <vector>
 
 class BinaryFile;
+class Replay;
 
 // This is for catching crashes and reporting bugs, it does not slow down anything.
 class DebugInfo
@@ -16,7 +17,7 @@ class DebugInfo
     Socket sock;
 
 public:
-    DebugInfo();
+    DebugInfo(const ProxySettings& proxy, unsigned int gfNumber);
     ~DebugInfo();
 
     static std::vector<void*> GetStackTrace(void* ctx = nullptr) noexcept;
@@ -28,7 +29,7 @@ public:
     bool SendString(const std::string& str);
 
     bool SendStackTrace(const std::vector<void*>& stacktrace);
-    bool SendReplay();
+    bool SendReplay(Replay* rpl);
     bool SendAsyncLog(const boost::filesystem::path& asyncLogFilepath);
     bool SendFile(BinaryFile& file);
 };

@@ -32,6 +32,7 @@ struct ReplayInfo;
 class SavedFile;
 class GamePlayer;
 class AIPlayer;
+class Replay;
 
 class GameServer :
     public Singleton<GameServer, SingletonPolicies::WithLongevity>,
@@ -77,6 +78,7 @@ public:
     std::string FormatGFTime(unsigned gf) const override;
     void SystemChat(const std::string& text) override;
     void SystemChat(const std::string& text, unsigned char fromPlayerIdx);
+    Replay* GameServer::GetReplay();
 
 private:
     bool StartGame();
@@ -182,6 +184,7 @@ private:
         std::string hostPassword, password, ownerName;
         unsigned short port;
         bool ipv6;
+        bool publish;
     } config;
 
     MapInfo mapinfo;

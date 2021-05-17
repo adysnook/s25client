@@ -7,8 +7,8 @@
 #include "Debug.h"
 #include "RTTR_Version.h"
 #include "Replay.h"
-#include "Settings.h"
-#include "network/GameClient.h"
+//#include "Settings.h"
+//#include "network/GameClient.h"
 #include "s25util/Log.h"
 #include <boost/endian/arithmetic.hpp>
 #include <boost/endian/conversion.hpp>
@@ -142,9 +142,9 @@ void captureBacktrace(std::vector<void*>& stacktrace) noexcept
 #endif
 } // namespace
 
-DebugInfo::DebugInfo()
+DebugInfo::DebugInfo(const ProxySettings& proxy, unsigned int gfNumber)
 {
-    sock.Connect("debug.rttr.info", 4123, false, SETTINGS.proxy);
+    sock.Connect("debug.rttr.info", 4123, false, proxy);
 
     Send("RTTRDBG", 7);
 
@@ -169,7 +169,7 @@ DebugInfo::DebugInfo()
     SendString(RTTR_Version::GetVersionDate());
     SendString(RTTR_Version::GetRevision());
 
-    SendUnsigned(GAMECLIENT.GetGFNumber());
+    SendUnsigned(gfNumber);
 }
 
 DebugInfo::~DebugInfo()
@@ -268,14 +268,14 @@ bool DebugInfo::SendStackTrace(const std::vector<void*>& stacktrace)
     return SendString(reinterpret_cast<const char*>(&endStacktrace[0]), stacktraceLen);
 }
 
-bool DebugInfo::SendReplay()
+bool DebugInfo::SendReplay(Replay* rpl)
 {
     LOG.write("Sending replay...\n");
 
     // Replay mode is on, no recording of replays active
-    if(!GAMECLIENT.IsReplayModeOn())
-    {
-        Replay* rpl = GAMECLIENT.GetReplay();
+    //if(!GAMECLIENT.IsReplayModeOn())
+    //{
+        //Replay* rpl = GAMECLIENT.GetReplay();
 
         if(!rpl || !rpl->IsRecording())
             return true;
@@ -293,10 +293,10 @@ bool DebugInfo::SendReplay()
         // Empty replay
         SendUnsigned(0);
         return false;
-    } else
-    {
+    //} else
+    //{
         LOG.write("-> Already in replay mode, do not send replay\n");
-    }
+    //}
 
     return true;
 }

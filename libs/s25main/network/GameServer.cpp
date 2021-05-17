@@ -49,6 +49,7 @@
 #include <iomanip>
 #include <iterator>
 #include <mygettext/mygettext.h>
+#include <GlobalVars.h>
 
 struct GameServer::AsyncLog
 {
@@ -216,11 +217,15 @@ bool GameServer::Start(const CreateServerInfo& csi, const boost::filesystem::pat
         return false;
     }
 
+    LOG.write("\n.GameServer started:%s\n") % config.gamename;
     if(config.servertype == ServerType::LAN)
         lanAnnouncer.Start();
     else if(config.servertype == ServerType::Lobby)
     {
-        LOBBYCLIENT.AddServer(config.gamename, mapinfo.title, (config.password.length() != 0), config.port);
+        if(config.ownerName == "") //is not hosted
+        {
+            LOBBYCLIENT.AddServer(config.gamename, mapinfo.title, (config.password.length() != 0), config.port);
+        }
         LOBBYCLIENT.AddListener(this);
     }
     AnnounceStatusChange();
@@ -258,8 +263,15 @@ void GameServer::AnnounceStatusChange()
         lanAnnouncer.SetPayload(ser.GetData(), ser.GetLength());
     } else if(config.servertype == ServerType::Lobby)
     {
-        if(LOBBYCLIENT.IsIngame())
-            LOBBYCLIENT.UpdateServerNumPlayers(GetNumFilledSlots(), playerInfos.size());
+        if(config.ownerName == "") //is not hosted
+        {
+            if(LOBBYCLIENT.IsIngame())
+                LOBBYCLIENT.UpdateServerNumPlayers(GetNumFilledSlots(), playerInfos.size());
+        }
+        else
+        {
+            LOG.write(".UpdateServerNumPlayers:%d,%d\n") % GetNumFilledSlots() % playerInfos.size();
+        }
     }
 }
 
@@ -280,8 +292,11 @@ void GameServer::LC_Created()
 // Hauptschleife
 void GameServer::Run()
 {
-    if(state == ServerState::Stopped)
+    if (state == ServerState::Stopped) {
+        if(config.ownerName != "") //is hosted server
+            GLOBALVARS.notdone = false;
         return;
+    }
 
     // auf tote Clients prüfen
     ClientWatchDog();
@@ -427,8 +442,10 @@ void GameServer::Stop()
 
     lanAnnouncer.Stop();
 
-    if(LOBBYCLIENT.IsLoggedIn()) // steht die Lobbyverbindung noch?
-        LOBBYCLIENT.DeleteServer();
+    if (config.ownerName == "") { //is not hosted
+        if(LOBBYCLIENT.IsLoggedIn()) // steht die Lobbyverbindung noch?
+            LOBBYCLIENT.DeleteServer();
+    }
     LOBBYCLIENT.RemoveListener(this);
 
     // status
@@ -1714,10 +1731,10 @@ void GameServer::SendAsyncLog(const bfs::path& asyncLogFilePath)
 #endif
     )
     {
-        DebugInfo di;
+        DebugInfo di(SETTINGS.proxy, GetGFNumber());
         LOG.write(_("Sending async logs %1%.\n")) % (di.SendAsyncLog(asyncLogFilePath) ? "succeeded" : "failed");
 
-        di.SendReplay();
+        di.SendReplay(GetReplay());
     }
 }
 
@@ -2103,4 +2120,9 @@ void GameServer::ExecuteAllGCs(uint8_t playerId, const PlayerGameCommands& gcs)
 {
     for(const gc::GameCommandPtr& gc : gcs.gcs)
         gc->Execute(game->world_, playerId);
+}
+
+Replay* GameServer::GetReplay()
+{
+    return replayinfo ? &replayinfo->replay : nullptr;
 }
